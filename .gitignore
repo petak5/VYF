@@ -129,4 +129,12 @@ dmypy.json
 .pyre/
 
 # Custom
+.DS_Store
 Images/
+*.png
+*.jpg
+*.jpeg
+*.NEF
+*.svg
+*.pdf
+*.pptx
