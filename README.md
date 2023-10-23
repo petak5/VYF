@@ -2,4 +2,4 @@
 Computational Photography (VYF) project
 
 ## Usage
-`python main.py target.jpg source.jpg`
+`python main.py -t <target-image> -s <source-image> [-o ./output/directory/]`

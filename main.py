@@ -14,6 +14,9 @@ def main():
     args = getArgs()
 
     Path(args.output).mkdir(parents=True, exist_ok=True)
+    Path(args.output + "/diff/").mkdir(parents=True, exist_ok=True)
+    Path(args.output + "/SIFT/").mkdir(parents=True, exist_ok=True)
+    Path(args.output + "/result/").mkdir(parents=True, exist_ok=True)
 
     print("Loading images...")
 
@@ -112,31 +115,39 @@ def main():
     # plt.imshow(img_matches, 'gray')
     # plt.show()
 
-    cv.imwrite(f"{args.output}/keypoints_s.png", img_keypoints_s)
-    cv.imwrite(f"{args.output}/keypoints_t.png", img_keypoints_t)
-    cv.imwrite(f"{args.output}/matches.png", img_matches)
+    cv.imwrite(f"{args.output}/SIFT/keypoints_s.png", img_keypoints_s)
+    cv.imwrite(f"{args.output}/SIFT/keypoints_t.png", img_keypoints_t)
+    cv.imwrite(f"{args.output}/SIFT/matches.png", img_matches)
 
     print("Done")
 
-    aligned_s = align_image(image_s, M)
-
-    cropped_s = crop_image(aligned_s, M)
+    # Cropped and aligned
+    uncropped_aligned_s = align_image(image_s, M)
+    cropped_aligned_s = crop_image(uncropped_aligned_s, M)
     cropped_t = crop_image(image_t, M)
 
-    # img_diff = skimage.util.compare_images(cropped_s, image_s)
-    img_diff_1 = cv.absdiff(cropped_s, cropped_t)
-    img_diff_2 = 255 - img_diff_1
+    cv.imwrite(f"{args.output}/result/uncropped_target.png", image_t)
+    cv.imwrite(f"{args.output}/result/uncropped_aligned_s.png", uncropped_aligned_s)
 
-    cv.imwrite(f"{args.output}/aligned_s.png", aligned_s)
-    cv.imwrite(f"{args.output}/target.png", image_t)
+    cv.imwrite(f"{args.output}/result/cropped_s.png", cropped_aligned_s)
+    cv.imwrite(f"{args.output}/result/cropped_t.png", cropped_t)
 
-    cv.imwrite(f"{args.output}/cropped_s.png", cropped_s)
-    cv.imwrite(f"{args.output}/cropped_t.png", cropped_t)
+    # Extended and aligned images
+    extended_aligned_s, extended_t = align_and_resize_images(image_s, image_t, M)
 
-    cv.imwrite(f"{args.output}/diff_1.png", img_diff_1)
-    cv.imwrite(f"{args.output}/diff_2.png", img_diff_2)
+    cv.imwrite(f"{args.output}/result/extended_aligned_s.png", extended_aligned_s)
+    cv.imwrite(f"{args.output}/result/extended_t.png", extended_t)
 
-    cv.imwrite(f"{args.output}/diff_orig.png", cv.absdiff(image_s, image_t))
+    # Diff images
+    orig_diff = cv.absdiff(image_s, image_t)
+    cropped_diff_1 = cv.absdiff(cropped_aligned_s, cropped_t)
+    cropped_diff_2 = 255 - cropped_diff_1
+    extended_diff = cv.absdiff(extended_aligned_s, extended_t)
+
+    cv.imwrite(f"{args.output}/diff/diff_orig.png", orig_diff)
+    cv.imwrite(f"{args.output}/diff/cropped_diff_1.png", cropped_diff_1)
+    cv.imwrite(f"{args.output}/diff/cropped_diff_2.png", cropped_diff_2)
+    cv.imwrite(f"{args.output}/diff/extended_diff.png", extended_diff)
 
     print("Done")
 
@@ -154,6 +165,31 @@ def getArgs():
 
 def align_image(image, homography):
     return cv.warpPerspective(image, homography, [image.shape[1], image.shape[0]])
+
+def align_and_resize_images(image_s, image_t, homography):
+    """ Extend and align images
+
+    Source image is resized to fit it's alignment warping, target image is also resized to the same dimensions.
+    """
+    h,w = image_s.shape[0:2]
+    points = np.array([[0,0], [0, h-1], [w-1, 0], [w-1, h-1]], dtype=float).reshape(-1, 1, 2)
+    points_transformed = cv.perspectiveTransform(points, homography)
+
+    top = ceil(abs(0 + min(0, points_transformed[0][0][1], points_transformed[1][0][1], points_transformed[2][0][1], points_transformed[3][0][1])))
+    bottom = ceil(abs(h - max(h, points_transformed[0][0][1], points_transformed[1][0][1], points_transformed[2][0][1], points_transformed[3][0][1])))
+    left = ceil(abs(0 - min(0, points_transformed[0][0][0], points_transformed[1][0][0], points_transformed[2][0][0], points_transformed[3][0][0])))
+    right = ceil(abs(w - max(w, points_transformed[0][0][0], points_transformed[1][0][0], points_transformed[2][0][0], points_transformed[3][0][0])))
+
+    extended_image = cv.copyMakeBorder(image_s, top, bottom, left, right, cv.BORDER_CONSTANT, None, value=0)
+
+    points += np.array([left, top])
+    points_transformed += np.array([left, top])
+
+    new_homography = cv.findHomography(points, points_transformed, cv.RANSAC, 5.0)[0]
+
+    aligned_image = cv.warpPerspective(extended_image, new_homography, [w + left + right, h + top + bottom])
+    extended_t = cv.copyMakeBorder(image_t, top, bottom, left, right, cv.BORDER_CONSTANT, None, value=0)
+    return aligned_image, extended_t
 
 # Crop image according to the homography transform
 def crop_image(image, homography):
