@@ -1,14 +1,10 @@
 import matplotlib.pyplot as plt
-from skimage import transform
+from pathlib import Path
 from skimage.color import rgb2gray
-from skimage.feature import match_descriptors, plot_matches, SIFT
 import skimage
-from PIL import Image
 import numpy as np
-from skimage.transform import pyramid_gaussian, pyramid_laplacian
 import argparse
 import cv2 as cv
-from datetime import datetime
 from math import floor, ceil
 
 RESIZE_IMAGE = True
@@ -16,6 +12,8 @@ RESIZE_RATIO = 4
 
 def main():
     args = getArgs()
+
+    Path(args.output).mkdir(parents=True, exist_ok=True)
 
     print("Loading images...")
 
@@ -93,7 +91,7 @@ def main():
 
     else:
         print ("Not enough matches are found - %d/%d" % (len(good),MIN_MATCH_COUNT))
-        matchesMask = None
+        return 1
 
     print("Drawing matches...")
 
@@ -102,12 +100,25 @@ def main():
                     matchesMask = matchesMask, # draw only inliers
                     flags = 2)
 
+    img_keypoints_s = cv.drawKeypoints(img_s, kp_s, 0)
+    img_keypoints_t = cv.drawKeypoints(img_t, kp_t, 0)
+    # _ = plt.figure("Source keypoints")
+    # plt.imshow(img_keypoints_s, 'gray')
+    # _ = plt.figure("Target keypoints")
+    # plt.imshow(img_keypoints_t, 'gray')
+    # plt.show()
+
     img_matches = cv.drawMatches(img_s,kp_s,img_t,kp_t,good,None,**draw_params)
-    # plt.imshow(img_matches, 'gray'),plt.show()
+    # plt.imshow(img_matches, 'gray')
+    # plt.show()
+
+    cv.imwrite(f"{args.output}/keypoints_s.png", img_keypoints_s)
+    cv.imwrite(f"{args.output}/keypoints_t.png", img_keypoints_t)
+    cv.imwrite(f"{args.output}/matches.png", img_matches)
 
     print("Done")
 
-    aligned_s = align_opencv(image_s, M)
+    aligned_s = align_image(image_s, M)
 
     cropped_s = crop_image(aligned_s, M)
     cropped_t = crop_image(image_t, M)
@@ -116,59 +127,32 @@ def main():
     img_diff_1 = cv.absdiff(cropped_s, cropped_t)
     img_diff_2 = 255 - img_diff_1
 
-    cv.imwrite("./cropped_s.png", cropped_s)
-    cv.imwrite("./cropped_t.png", cropped_t)
+    cv.imwrite(f"{args.output}/aligned_s.png", aligned_s)
+    cv.imwrite(f"{args.output}/target.png", image_t)
 
-    cv.imwrite("./diff_1.png", img_diff_1)
-    cv.imwrite("./diff_2.png", img_diff_2)
+    cv.imwrite(f"{args.output}/cropped_s.png", cropped_s)
+    cv.imwrite(f"{args.output}/cropped_t.png", cropped_t)
+
+    cv.imwrite(f"{args.output}/diff_1.png", img_diff_1)
+    cv.imwrite(f"{args.output}/diff_2.png", img_diff_2)
+
+    cv.imwrite(f"{args.output}/diff_orig.png", cv.absdiff(image_s, image_t))
 
     print("Done")
+
+    return 0
 
 def getArgs():
     parser = argparse.ArgumentParser(prog='ImageRegistration',
                             description='Image registration for HDR image creation.',
-                            epilog='Text at the bottom of help')
-    parser.add_argument("target")
-    parser.add_argument("source")
+                            epilog='Text at the bottom of help.')
+    parser.add_argument("-t", "--target", required=True, help="Target image.")
+    parser.add_argument("-s", "--source", required=True, help="Source image.")
+    parser.add_argument("-o", "--output", default="./out/", help="Output directory.")
 
     return parser.parse_args()
 
-def extract_features(image):
-    descriptor_extractor = SIFT()
-
-    descriptor_extractor.detect_and_extract(image)
-    keypoints = descriptor_extractor.keypoints
-    descriptors = descriptor_extractor.descriptors
-    return keypoints, descriptors
-
-def show_matches(image_source, image_target, keypoints_source, keypoints_target, matches):
-    fig, ax = plt.subplots(nrows=2, ncols=1, figsize=(13, 10))
-
-    plt.gray()
-
-    plot_matches(ax[0], image_source, image_target, keypoints_source, keypoints_target, matches)
-    ax[0].axis('off')
-    ax[0].set_title("Source Image and Target Image\n"
-                    "(all keypoints and matches)")
-
-    plot_matches(ax[1], image_source, image_target, keypoints_source, keypoints_target, matches[::15],
-            only_matches=True)
-    ax[1].axis('off')
-    ax[1].set_title("Source Image and Target Image\n(subset of matches for visibility)")
-
-    plt.tight_layout()
-    plt.show()
-
-def compute_homography(keypoints_source, keypoints_target):
-    assert(keypoints_source.shape[0] >= 4)
-    assert(keypoints_target.shape[0] >= 4)
-    h = cv.findHomography(srcPoints=keypoints_source, dstPoints=keypoints_target)#, method=cv.RANSAC, ransacReprojThreshold=5.0)
-    return h[0]
-
-def align_opencv(image, homography):
-    return cv.warpPerspective(image, homography, [image.shape[1], image.shape[0]])
-
-def align_skimage(image, homography):
+def align_image(image, homography):
     return cv.warpPerspective(image, homography, [image.shape[1], image.shape[0]])
 
 # Crop image according to the homography transform
@@ -189,100 +173,5 @@ def crop_image(image, homography):
 
     return skimage.util.crop(image, ((top_y, from_bottom), (left_x, from_right), (0, 0)), copy=False)
 
-def old_skimage_method():
-    # print("Detecting descriptors of target image...")
-
-    # start=datetime.now()
-
-    # keypoints_t, descriptors_t = extract_features(img_t)
-
-    # print("Done")
-    # print("Detecting descriptors of source image...")
-
-    # keypoints_s, descriptors_s = extract_features(img_s)
-
-    # print("Done")
-    # print("Matching descriptors...")
-
-    # matches = match_descriptors(descriptors_s, descriptors_t, max_ratio=0.6, cross_check=True)
-
-    # print("Done")
-    # print(datetime.now()-start)
-
-    # show_matches(img_s, img_t, keypoints_s, keypoints_t, matches)
-
-    # print("Source descriptors: ", descriptors_s.size)
-    # print("Target descriptors: ", descriptors_t.size)
-    # print("Source keypoints: ", keypoints_s.size)
-    # print("Target keypoints: ", keypoints_t.size)
-    # print("Matches: ", matches.size)
-
-    # # TODO: Improve this
-    # keypoints_s_filtered = []
-    # keypoints_t_filtered = []
-    # deltas = []
-    # for match in matches:
-    #         k_s = keypoints_s[match[0]]
-    #         k_t = keypoints_t[match[1]]
-
-    #         keypoints_s_filtered.append([k_s[1], k_s[0]])
-    #         keypoints_t_filtered.append([k_t[1], k_t[0]])
-
-    #         dx = k_s[0] - k_t[0]
-    #         dy = k_s[1] - k_t[1]
-
-    #         deltas.append([dx, dy])
-
-    # keypoints_s_filtered = np.array(keypoints_s_filtered)
-    # keypoints_t_filtered = np.array(keypoints_t_filtered)
-    # deltas = np.array(deltas)
-    # median = np.median(deltas, axis=0)
-
-    # ####################
-    # # Primitive method #
-    # ####################
-    # dx = median[1]
-    # dy = median[0]
-    # vector = (dx, dy)
-    # print("Translation vector: ", vector)
-    # tform_align = transform.AffineTransform(translation=vector)
-    # img_s_aligned = transform.warp(image_s, tform_align, mode="edge", preserve_range=True).astype(image_s.dtype)
-
-    # img_diff_orig = skimage.util.compare_images(image_t, image_s)
-    # img_diff_aligned = skimage.util.compare_images(image_t, img_s_aligned)
-    # plt.imshow(img_diff_orig)
-    # plt.title("No Alignment")
-    # plt.show()
-    # plt.imshow(img_diff_aligned)
-    # plt.title("Primitive Alignment")
-    # plt.show()
-
-    # skimage.io.imsave("./test_orig.png", skimage.util.img_as_ubyte(img_diff_orig))
-    # skimage.io.imsave("./test_aligned.png", skimage.util.img_as_ubyte(img_diff_aligned))
-
-    #################
-    # Proper method #
-    #################
-
-    # homography = compute_homography(keypoints_s_filtered, keypoints_t_filtered)
-    # print("Homography:\n", homography)
-    # img_s_aligned_opencv = align_opencv(image_s, homography)
-    # img_s_aligned_skimage = align_skimage(image_s, homography)
-    # skimage.io.imsave("./test_aligned_opencv.png", skimage.util.img_as_ubyte(img_s_aligned_opencv))
-    # skimage.io.imsave("./test_aligned_skimage.png", skimage.util.img_as_ubyte(img_s_aligned_skimage))
-
-    # img_diff_aligned_opencv = skimage.util.compare_images(image_t, img_s_aligned_opencv)
-    # img_diff_aligned_skimage = skimage.util.compare_images(image_t, img_s_aligned_skimage)
-    # skimage.io.imsave("./test_diff_aligned_opencv.png", skimage.util.img_as_ubyte(img_diff_aligned_opencv))
-    # skimage.io.imsave("./test_diff_aligned_skimage.png", skimage.util.img_as_ubyte(img_diff_aligned_skimage))
-
-    # plt.imshow(img_diff_aligned_opencv)
-    # plt.title("Warped with calculated homography\nusing matched features from SIFT (OpenCV)")
-    # plt.show()
-    # plt.imshow(img_diff_aligned_skimage)
-    # plt.title("Warped with calculated homography\nusing matched features from SIFT (skimage)")
-    # plt.show()
-
-    raise NotImplementedError
-
-main()
+if __name__ == "__main__":
+    exit(main())
